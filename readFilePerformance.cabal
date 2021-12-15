@@ -1,4 +1,4 @@
-cabal-version:      2.4
+cabal-version:      3.0
 name:               readFilePerformance
 version:            0.1.0.0
 
@@ -40,5 +40,5 @@ executable readFilePerformance
     hs-source-dirs:   app
     default-language: Haskell2010
     ghc-options:
+        -prof
         -Wall
-        -fprof-auto

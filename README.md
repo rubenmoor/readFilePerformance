@@ -10,7 +10,7 @@ performance optimization
 
 Run with profiling
 
-    cabal new-run --enable-profiling readFilePerformance -- +RTS -hc -s
+    cabal run --enable-profiling readFilePerformance -- +RTS -hc -s
 
 ### Stack
 

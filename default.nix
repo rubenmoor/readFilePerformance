@@ -1,5 +1,6 @@
 let
-  pkgs = import <nixpkgs> { inherit config; };
+  # pkgs = import <nixpkgs> { inherit config; };
+  pkgs = import <nixos-unstable> { inherit config; };
   easy-hls-src = pkgs.fetchFromGitHub {
     owner = "jkachmar";
     repo = "easy-hls-nix";
@@ -8,7 +9,7 @@ let
   };
   easy-hls = pkgs.callPackage easy-hls-src { ghcVersions = [ "8.8.4" ]; };
 
-  compiler = "ghc884";
+  compiler = "ghc921";
   config = {
     packageOverrides = pkgs: rec {
       haskell = pkgs.haskell // {
@@ -40,7 +41,7 @@ in
         nativeBuildInputs =
           oldAttrs.nativeBuildInputs ++ [
             cabal-install
-            easy-hls
+            # easy-hls
           ];
       });
     exec = drv;

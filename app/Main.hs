@@ -16,8 +16,9 @@ import qualified Data.Text.Lazy as Lazy
 import qualified Data.Text.Lazy.IO as Lazy
 import Data.Vector (Vector, freeze, thaw)
 import qualified Data.Vector as Vector
-import Data.Vector.Algorithms.Intro (sortBy)
+import qualified Data.Vector.Algorithms.Tim as Tim
 import System.IO (hFlush, stdout)
+import GHC.Conc (pseq)
 
 main :: IO ()
 main = do
@@ -33,6 +34,12 @@ main = do
     hFlush stdout
     u2 <- runV2
     putStrLn $ u2 `seq` " done."
+
+    putStrLn ""
+    putStr "Running v3 ..."
+    hFlush stdout
+    u3 <- runV3
+    putStrLn $ u3 `seq` " done."
 
 fileFrequencies :: FilePath
 fileFrequencies = "deu_news_2020_freq.txt"
@@ -50,13 +57,14 @@ runV1 :: IO ()
 runV1 = do
     mapFrequencies <- readFrequencies
     ls <- Text.lines <$> Text.readFile fileData
-    let sorted = quicksort mapFrequencies $ Vector.fromList ls
-    Text.writeFile fileSorted $ Text.unlines $ Vector.toList sorted
+    let sorted = quicksort mapFrequencies $ {-# SCC vec #-} Vector.fromList ({-# SCC ls #-} ls)
+    Text.writeFile fileSorted $ Text.unlines $ {-# SCC lsSorted #-} Vector.toList ({-# SCC sorted #-} sorted)
   where
+    {-# SCC readFrequencies #-}
     readFrequencies :: IO (HashMap Text Int)
     readFrequencies = do
         ls <- Text.lines <$> Text.readFile fileFrequencies
-        pure $ mkHashMap ls
+        pure $ {-# SCC hmap #-} mkHashMap ({-# SCC ls #-} ls)
 
 {- |
 why not Lazy? read the file line by line, no need to hold it all in memory
@@ -65,23 +73,38 @@ runV2 :: IO ()
 runV2 = do
     mapFrequencies <- readFrequencies
     ls <- fmap Lazy.toStrict . Lazy.lines <$> Lazy.readFile fileData
+    let sorted = quicksort mapFrequencies $ {-# SCC vec #-} Vector.fromList ({-# SCC ls #-} ls)
+    Text.writeFile fileSorted $ Text.unlines $ {-# sCC lsSorted #-} Vector.toList ({-# SCC sorted #-} sorted)
+  where
+    {-# SCC readFrequencies #-}
+    readFrequencies :: IO (HashMap Text Int)
+    readFrequencies = do
+        ls <- fmap Lazy.toStrict . Lazy.lines <$> Lazy.readFile fileFrequencies
+        pure $ {-# SCC hmap #-} mkHashMap ({-# SCC ls #-} ls)
 
-    let
-        -- alternatives:
+{-|
+trying to help with garbage collection, only making it worse
+-}
+runV3 :: IO ()
+runV3 = do
+    mapFrequencies <- readFrequencies
+    ls <- fmap Lazy.toStrict . Lazy.lines <$> Lazy.readFile fileData
+
+    let -- alternatives:
         --     Vector.fromListN (length ls) ls
         --     Vector.generate (length ls) $ \i -> ls !! i
-        vec = Vector.fromList ls
+        vec = {-# SCC vec #-} Vector.fromList ({-# SCC ls #-} ls)
 
-        -- the idea: ls can get garbage-collected
-        sorted = vec `seq` quicksort mapFrequencies vec
+        -- the idea: ls can get garbage-collected ...
+        sorted = vec `seq` {-# SCC sorted #-} quicksort mapFrequencies vec
 
-    -- I don't know what the lazy version of writeFile does differently
-    Lazy.writeFile fileSorted $ Lazy.unlines $ Lazy.fromStrict <$> Vector.toList sorted
+    -- ... before we sort and write to the file
+    sorted `pseq` Lazy.writeFile fileSorted (Lazy.unlines $ Lazy.fromStrict <$> {-# SCC lsSorted #-} Vector.toList sorted)
   where
     readFrequencies :: IO (HashMap Text Int)
     readFrequencies = do
         ls <- fmap Lazy.toStrict . Lazy.lines <$> Lazy.readFile fileFrequencies
-        pure $ mkHashMap ls
+        pure $ {-# SCC hmap #-} mkHashMap ({-# SCC ls #-} ls)
 
 freq :: HashMap Text Int -> Text -> Int
 freq m w = fromMaybe 0 $ HashMap.lookup w m
@@ -90,12 +113,15 @@ quicksort ::
     HashMap Text Int -> Vector Text -> Vector Text
 quicksort freqs vec = runST $ do
     mvec <- thaw vec
-    sortBy (comparing $ Down <<< freq freqs) mvec
+    Tim.sortBy (comparing $ Down <<< freq freqs) mvec
     freeze mvec
 
 mkHashMap :: [Text] -> HashMap Text Int
 mkHashMap ls =
-    HashMap.fromList $ catMaybes $ ls <&> \l -> case Text.head l of
-                            '#' -> Nothing
-                            _ -> let [w, f] = Text.splitOn "\t" l
-                                 in Just (w, read $ Text.unpack f)
+    HashMap.fromList $
+        catMaybes $
+            ls <&> \l -> case Text.head l of
+                '#' -> Nothing
+                _ ->
+                    let [w, f] = Text.splitOn "\t" l
+                     in Just (w, read $ Text.unpack f)
