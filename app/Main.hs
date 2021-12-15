@@ -34,12 +34,6 @@ main = do
     u2 <- runV2
     putStrLn $ u2 `seq` " done."
 
-    putStrLn ""
-    putStr "Running v3 ..."
-    hFlush stdout
-    u3 <- runV3
-    putStrLn $ u3 `seq` " done."
-
 fileFrequencies :: FilePath
 fileFrequencies = "deu_news_2020_freq.txt"
 
@@ -88,29 +82,6 @@ runV2 = do
     readFrequencies = do
         ls <- fmap Lazy.toStrict . Lazy.lines <$> Lazy.readFile fileFrequencies
         pure $ mkHashMap ls
-
-{- |
-Lazy IO apparently implies that files are longer in use than needed
--}
-runV3 :: IO ()
-runV3 = do
-    mapFrequencies <- readFrequencies
-    ls <- fmap Lazy.toStrict . Lazy.lines <$> Lazy.readFile fileData
-
-    let
-        vec = Vector.fromList ls
-
-        -- the idea: ls can get garbage-collected, but ...
-        sorted = vec `seq` quicksort mapFrequencies vec
-
-    -- ... fileData is still locked ¯\_(ツ)_/¯
-    Lazy.writeFile fileData $ Lazy.unlines $ Lazy.fromStrict <$> Vector.toList sorted
-  where
-    readFrequencies :: IO (HashMap Text Int)
-    readFrequencies = do
-        ls <- fmap Lazy.toStrict . Lazy.lines <$> Lazy.readFile fileFrequencies
-        pure $ mkHashMap ls
-
 
 freq :: HashMap Text Int -> Text -> Int
 freq m w = fromMaybe 0 $ HashMap.lookup w m
