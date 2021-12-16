@@ -33,6 +33,7 @@ executable readFilePerformance
     build-depends:
           base
         , directory
+        , strict
         , text
         , unordered-containers
         , vector
@@ -40,5 +41,4 @@ executable readFilePerformance
     hs-source-dirs:   app
     default-language: Haskell2010
     ghc-options:
-        -prof
         -Wall
