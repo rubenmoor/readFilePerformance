@@ -1,4 +1,7 @@
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE BangPatterns #-}
+{-# LANGUAGE KindSignatures #-}
 
 module Main where
 
@@ -18,7 +21,7 @@ import Data.Vector (Vector, freeze, thaw)
 import qualified Data.Vector as Vector
 import qualified Data.Vector.Algorithms.Tim as Tim
 import System.IO (hFlush, stdout)
-import GHC.Conc (pseq)
+import Control.Monad ((<$!>))
 
 main :: IO ()
 main = do
@@ -56,6 +59,7 @@ straightforward implementation, using Text-based IO
 runV1 :: IO ()
 runV1 = do
     mapFrequencies <- readFrequencies
+    -- this causes a thunk to be built up and consumed
     ls <- Text.lines <$> Text.readFile fileData
     let sorted = quicksort mapFrequencies $ {-# SCC vec #-} Vector.fromList ({-# SCC ls #-} ls)
     Text.writeFile fileSorted $ Text.unlines $ {-# SCC lsSorted #-} Vector.toList ({-# SCC sorted #-} sorted)
@@ -63,6 +67,7 @@ runV1 = do
     {-# SCC readFrequencies #-}
     readFrequencies :: IO (HashMap Text Int)
     readFrequencies = do
+        -- this causes a thunk to be built up and consumed
         ls <- Text.lines <$> Text.readFile fileFrequencies
         pure $ {-# SCC hmap #-} mkHashMap ({-# SCC ls #-} ls)
 
@@ -73,8 +78,13 @@ runV2 :: IO ()
 runV2 = do
     mapFrequencies <- readFrequencies
     ls <- fmap Lazy.toStrict . Lazy.lines <$> Lazy.readFile fileData
-    let sorted = quicksort mapFrequencies $ {-# SCC vec #-} Vector.fromList ({-# SCC ls #-} ls)
-    Text.writeFile fileSorted $ Text.unlines $ {-# sCC lsSorted #-} Vector.toList ({-# SCC sorted #-} sorted)
+    -- the following causes thunks here
+    -- ls <- fmap Lazy.toStrict . Lazy.lines <$> Lazy.readFile fileData
+    let
+        vec = {-# SCC vec #-} Vector.fromList ({-# SCC ls #-} ls)
+        sorted = quicksort mapFrequencies vec
+    Lazy.writeFile fileSorted
+        (Lazy.unlines $ Lazy.fromStrict <$> {-# SCC lsSorted #-} Vector.toList sorted)
   where
     {-# SCC readFrequencies #-}
     readFrequencies :: IO (HashMap Text Int)
@@ -88,18 +98,13 @@ trying to help with garbage collection, only making it worse
 runV3 :: IO ()
 runV3 = do
     mapFrequencies <- readFrequencies
-    ls <- fmap Lazy.toStrict . Lazy.lines <$> Lazy.readFile fileData
-
-    let -- alternatives:
-        --     Vector.fromListN (length ls) ls
-        --     Vector.generate (length ls) $ \i -> ls !! i
+    ls <- (Lazy.toStrict <$!>) . Lazy.lines <$> Lazy.readFile fileData
+    let
         vec = {-# SCC vec #-} Vector.fromList ({-# SCC ls #-} ls)
+        sorted = {-# SCC sorted #-} quicksort mapFrequencies vec
 
-        -- the idea: ls can get garbage-collected ...
-        sorted = vec `seq` {-# SCC sorted #-} quicksort mapFrequencies vec
-
-    -- ... before we sort and write to the file
-    sorted `pseq` Lazy.writeFile fileSorted (Lazy.unlines $ Lazy.fromStrict <$> {-# SCC lsSorted #-} Vector.toList sorted)
+    Lazy.writeFile fileSorted
+        (Lazy.unlines $ Lazy.fromStrict <$> {-# SCC lsSorted #-} Vector.toList sorted)
   where
     readFrequencies :: IO (HashMap Text Int)
     readFrequencies = do
