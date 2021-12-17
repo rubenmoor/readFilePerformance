@@ -10,17 +10,16 @@ import Control.Monad.ST (runST)
 import Data.Functor ((<&>))
 import Data.HashMap.Strict (HashMap)
 import qualified Data.HashMap.Strict as HashMap
-import Data.Maybe (catMaybes, fromMaybe)
+import Data.Maybe (catMaybes)
 import Data.Ord (Down (Down), comparing)
 import Data.Text (Text)
 import qualified Data.Text as Text
-import qualified Data.Text.IO as Text
 import qualified Data.Text.Lazy as Lazy
 import qualified Data.Text.Lazy.IO as Lazy
 import Data.Vector (Vector, freeze, thaw)
 import qualified Data.Vector as Vector
 import qualified Data.Vector.Algorithms.Tim as Tim
-import System.IO (hFlush, stdout)
+import System.IO (hFlush, stdout, Handle, IOMode (WriteMode), withBinaryFile)
 import Control.Monad ((<$!>))
 import Data.Word (Word8)
 import Data.ByteString (ByteString)
@@ -29,7 +28,13 @@ import qualified Data.ByteString.Unsafe as BS
 import qualified Data.ByteString.Char8 as Char8
 import qualified Data.Map as Map
 import qualified Data.ByteString.Builder as BSB
+import qualified Data.ByteString.Builder.Internal as BSB
 import Data.List (sortOn)
+import Prelude hiding (writeFile)
+import Data.Map.Strict (Map)
+import qualified Data.Vector.Algorithms.Intro as Intro
+import qualified Data.ByteString.Lazy as LBS
+import qualified Data.ByteString.Lazy.Char8 as LChar8
 
 main :: IO ()
 main = do
@@ -88,8 +93,8 @@ runV2 :: IO ()
 runV2 = do
     mapFrequencies <- Map.fromList . parseFrequencies <$> BS.readFile fileFrequencies
     ls <- Char8.lines <$> BS.readFile fileData
-    let sorted = sortOn (\k -> Map.findWithDefault 0 k mapFrequencies) ls
-    BSB.writeFile fileSorted $ foldMap ((<> "\n") . BSB.byteString) sorted
+    let sorted = sortOn (Down <<< \k -> Map.findWithDefault 0 k mapFrequencies) ls
+    writeFile fileSorted $ foldMap ((<> "\n") . BSB.byteString) sorted
 
 {-|
 trying to help with garbage collection, only making it worse
@@ -97,25 +102,22 @@ trying to help with garbage collection, only making it worse
 runV3 :: IO ()
 runV3 = do
     mapFrequencies <- Map.fromList . parseFrequencies <$> BS.readFile fileFrequencies
-    ls <- Char8.lines <$> BS.readFile fileData
-    let
-        vec = {-# SCC vec #-} Vector.fromList ({-# SCC ls #-} ls)
-        sorted = quicksort mapFrequencies vec
-    BSB.writeFile fileSorted $ foldMap ((<> "\n") . BSB.byteString) sorted
-  where
-    readFrequencies :: IO (HashMap Text Int)
-    readFrequencies = do
-        ls <- fmap Lazy.toStrict . Lazy.lines <$> Lazy.readFile fileFrequencies
-        pure $ {-# SCC hmap #-} mkHashMap ({-# SCC ls #-} ls)
-
-freq :: HashMap Text Int -> Text -> Int
-freq m w = HashMap.findWithDefault w m
+    ls <- (LBS.toStrict <$!>) . LChar8.lines <$> LBS.readFile fileData
+    let sorted = sortOn (Down <<< \k -> Map.findWithDefault 0 k mapFrequencies) ls
+    writeFile fileSorted $ foldMap ((<> "\n") . BSB.byteString) sorted
 
 quicksort ::
     HashMap Text Int -> Vector Text -> Vector Text
-quicksort freqs vec = runST $ do
+quicksort mapFreqs vec = runST $ do
     mvec <- thaw vec
-    Tim.sortBy (comparing $ Down <<< freq freqs) mvec
+    Tim.sortBy (comparing $ Down <<< \k -> HashMap.findWithDefault 0 k mapFreqs) mvec
+    freeze mvec
+
+quicksortBS ::
+    Map ByteString Int -> Vector ByteString -> Vector ByteString
+quicksortBS mapFreqs vec = runST $ do
+    mvec <- thaw vec
+    Intro.sortBy (comparing $ Down <<< \k -> Map.findWithDefault 0 k mapFreqs) mvec
     freeze mvec
 
 mkHashMap :: [Text] -> HashMap Text Int
@@ -145,3 +147,12 @@ parseFrequencies bs = case BS.uncons bs of
 
     tab :: Word8
     tab = 9 -- '\t'
+
+hPutBuilder :: Handle -> BSB.Builder -> IO ()
+hPutBuilder h = BSB.hPut h . BSB.putBuilder
+
+modifyFile :: IOMode -> FilePath -> BSB.Builder -> IO ()
+modifyFile mode f bld = withBinaryFile f mode (`hPutBuilder` bld)
+
+writeFile :: FilePath -> BSB.Builder -> IO ()
+writeFile = modifyFile WriteMode
