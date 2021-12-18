@@ -1,3 +1,4 @@
+{ ghcStr ? "ghc901" }:
 let
   easy-hls-src = pkgs.fetchFromGitHub {
     owner = "jkachmar";
@@ -11,12 +12,11 @@ let
   # to avoid a cyclic dependency on bytestring
   callCabal2nix = pkgs.haskell.packages.ghc884.callCabal2nix;
   callHackage = pkgs.haskell.packages.ghc884.callHackage;
-  compiler = "ghc901";
   config = {
     packageOverrides = pkgs: rec {
       haskell = pkgs.haskell // {
         packages = pkgs.haskell.packages // {
-          "${compiler}" = pkgs.haskell.packages."${compiler}".override {
+          "${ghcStr}" = pkgs.haskell.packages."${ghcStr}".override {
             overrides = self: super: {
               # overrides
               #bytestring = callHackage "bytestring" "0.11.2.0" {};
@@ -29,7 +29,7 @@ let
   };
   # pkgs = import <nixpkgs> { inherit config; };
   pkgs = import <nixos-unstable> { inherit config; };
-  drv = pkgs.haskell.packages."${compiler}".callCabal2nix "readFilePerformance" ./. { };
+  drv = pkgs.haskell.packages."${ghcStr}".callCabal2nix "readFilePerformance" ./. { };
 in
   {
     env =
